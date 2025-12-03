@@ -45,9 +45,9 @@ struct SceneUniforms {
 
 struct ModelUniforms {
 	veekay::mat4 model;
-	veekay::vec3 albedo_color; float _pad0;
+	veekay::vec4 albedo_color;
 	uint32_t texture_index;
-	float _pad1[3];
+	uint32_t _pad1[3];
 };
 
 struct Mesh {
@@ -243,6 +243,37 @@ veekay::graphics::Texture* createCheckerTexture(VkCommandBuffer cmd, uint32_t si
 			                       (uint32_t(c) << 16) |
 			                       (uint32_t(c) << 8) |
 			                       uint32_t(c);
+		}
+	}
+	return new veekay::graphics::Texture(cmd, size, size, VK_FORMAT_B8G8R8A8_UNORM, pixels.data());
+}
+
+veekay::graphics::Texture* createWoodTexture(VkCommandBuffer cmd, uint32_t size = 512) {
+	std::vector<uint32_t> pixels(size * size);
+	for (uint32_t y = 0; y < size; ++y) {
+		for (uint32_t x = 0; x < size; ++x) {
+			float t = float(x) / float(size);
+			float grain = 0.5f + 0.5f * std::sin((t * 20.0f + float(y) * 0.05f));
+			uint8_t r = uint8_t(120 + 60 * grain);
+			uint8_t g = uint8_t(80 + 40 * grain);
+			uint8_t b = uint8_t(50 + 20 * grain);
+			pixels[y * size + x] = 0xff000000 | (uint32_t(r) << 16) | (uint32_t(g) << 8) | b;
+		}
+	}
+	return new veekay::graphics::Texture(cmd, size, size, VK_FORMAT_B8G8R8A8_UNORM, pixels.data());
+}
+
+veekay::graphics::Texture* createMetalTexture(VkCommandBuffer cmd, uint32_t size = 512) {
+	std::vector<uint32_t> pixels(size * size);
+	for (uint32_t y = 0; y < size; ++y) {
+		for (uint32_t x = 0; x < size; ++x) {
+			float v = 0.6f + 0.3f * std::sin(float(x) * 0.1f) * std::cos(float(y) * 0.15f);
+			uint8_t c = uint8_t(255 * std::clamp(v, 0.0f, 1.0f));
+			uint8_t spec = uint8_t(40 + 20 * std::sin(float(x + y) * 0.05f));
+			pixels[y * size + x] = 0xff000000 |
+			                       (uint32_t(c) << 16) |
+			                       (uint32_t(c) << 8) |
+			                       uint32_t(c - spec / 2);
 		}
 	}
 	return new veekay::graphics::Texture(cmd, size, size, VK_FORMAT_B8G8R8A8_UNORM, pixels.data());
@@ -728,12 +759,12 @@ void initialize(VkCommandBuffer cmd) {
 		}
 
 		color_textures.reserve(max_textures);
-		color_textures.push_back(createCheckerTexture(cmd, 512, 48)); // 0: floor
-		if (auto tex = loadTexture(cmd, "./assets/lenna.png")) {       // 1: fun texture
+		color_textures.push_back(createCheckerTexture(cmd, 512, 48)); // 0: base
+		color_textures.push_back(createWoodTexture(cmd));             // 1: wood
+		color_textures.push_back(createMetalTexture(cmd));            // 2: metal
+		if (auto tex = loadTexture(cmd, "./assets/lenna.png")) {      // 3: lenna fallback
 			color_textures.push_back(tex);
-		}
-		// Fill remaining slots with missing texture for safe indexing
-		while (color_textures.size() < max_textures) {
+		} else {
 			color_textures.push_back(missing_texture);
 		}
 	}
@@ -1026,8 +1057,8 @@ void initialize(VkCommandBuffer cmd) {
 		.transform = Transform{
 			.position = {0.0f, 0.0f, 0.0f},
 		},
-		.albedo_color = veekay::vec3{0.8f, 0.8f, 0.8f},
-		.texture_index = 0,
+		.albedo_color = veekay::vec3{1.0f, 1.0f, 1.0f},
+		.texture_index = 1, // wood floor
 	});
 
 	// NOTE: Add cube model to scene
@@ -1036,8 +1067,8 @@ void initialize(VkCommandBuffer cmd) {
 		.transform = Transform{
 			.position = {0.0f, 0.5f, 0.0f},
 		},
-		.albedo_color = veekay::vec3{0.0f, 0.5f, 1.0f},
-		.texture_index = 1,
+		.albedo_color = veekay::vec3{1.0f, 1.0f, 1.0f},
+		.texture_index = 2, // metal
 	});
 
 	// NOTE: Extra cubes/pillars to show shadow falloff at different depths
@@ -1046,8 +1077,8 @@ void initialize(VkCommandBuffer cmd) {
 		.transform = Transform{
 			.position = {2.0f, 0.5f, 1.5f},
 		},
-		.albedo_color = veekay::vec3{0.9f, 0.4f, 0.2f},
-		.texture_index = 1,
+		.albedo_color = veekay::vec3{1.0f, 1.0f, 1.0f},
+		.texture_index = 1, // wood
 	});
 
 	models.emplace_back(Model{
@@ -1055,8 +1086,8 @@ void initialize(VkCommandBuffer cmd) {
 		.transform = Transform{
 			.position = {-2.5f, 0.5f, -1.0f},
 		},
-		.albedo_color = veekay::vec3{0.3f, 0.8f, 0.3f},
-		.texture_index = 1,
+		.albedo_color = veekay::vec3{1.0f, 1.0f, 1.0f},
+		.texture_index = 3, // lenna accent
 	});
 
 	// Removed tall yellow column to declutter view
@@ -1260,7 +1291,7 @@ void update(double time) {
 		} else {
 			uniforms.model = model.transform.matrix();
 		}
-		uniforms.albedo_color = model.albedo_color;
+		uniforms.albedo_color = veekay::vec4{model.albedo_color.x, model.albedo_color.y, model.albedo_color.z, 1.0f};
 		uniforms.texture_index = model.texture_index;
 	}
 

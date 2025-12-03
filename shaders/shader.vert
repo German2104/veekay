@@ -28,8 +28,9 @@ layout (binding = 0, std140) uniform SceneUniforms {
 
 layout (binding = 1, std140) uniform ModelUniforms {
 	mat4 model;
-	vec3 albedo_color;
+	vec4 albedo_color;
 	int texture_index;
+	int _pad_tex[3];
 };
 
 void main() {

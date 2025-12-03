@@ -26,8 +26,9 @@ layout (binding = 0, std140) uniform SceneUniforms {
 
 layout (binding = 1, std140) uniform ModelUniforms {
 	mat4 model;
-	vec3 albedo_color;
+	vec4 albedo_color;
 	int texture_index;
+	int _pad_tex[3];
 };
 
 layout (binding = 2) uniform sampler2D textures[4];
@@ -66,7 +67,7 @@ float calculateShadow(vec4 light_space_pos) {
 }
 
 void main() {
-	vec3 albedo = albedo_color;
+	vec3 albedo = albedo_color.rgb;
 	if (texture_index >= 0 && texture_index < 4) {
 		albedo *= texture(textures[texture_index], f_uv).rgb;
 	}

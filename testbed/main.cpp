@@ -369,6 +369,12 @@ void initialize(VkCommandBuffer cmd) {
 					.descriptorCount = 1,
 					.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
 				},
+				{
+					.binding = 2,
+					.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+					.descriptorCount = 1,
+					.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+				},
 			};
 
 			VkDescriptorSetLayoutCreateInfo info{
@@ -453,7 +459,21 @@ void initialize(VkCommandBuffer cmd) {
 	{
 		VkSamplerCreateInfo info{
 			.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-			.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+			.magFilter = VK_FILTER_LINEAR,
+			.minFilter = VK_FILTER_LINEAR,
+			.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+			.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+			.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+			.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+			.mipLodBias = 0.0f,
+			.anisotropyEnable = VK_FALSE,
+			.maxAnisotropy = 1.0f,
+			.compareEnable = VK_FALSE,
+			.compareOp = VK_COMPARE_OP_ALWAYS,
+			.minLod = 0.0f,
+			.maxLod = 0.0f,
+			.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK,
+			.unnormalizedCoordinates = VK_FALSE,
 		};
 
 		if (vkCreateSampler(device, &info, nullptr, &missing_texture_sampler) != VK_SUCCESS) {
@@ -472,6 +492,69 @@ void initialize(VkCommandBuffer cmd) {
 		                                                pixels);
 	}
 
+	// NOTE: Load texture from file
+	{
+		std::vector<unsigned char> image;
+		unsigned width, height;
+		unsigned error = lodepng::decode(image, width, height, "./assets/lenna.png");
+
+		if (error) {
+			std::cerr << "Failed to load texture: " << lodepng_error_text(error) << "\n";
+			// Use missing texture as fallback
+			texture = missing_texture;
+			texture_sampler = missing_texture_sampler;
+		} else {
+			// Convert RGBA to BGRA format (VK_FORMAT_B8G8R8A8_UNORM expects BGRA)
+			// lodepng gives us RGBA, we need BGRA: swap R and B
+			// B8G8R8A8 format in memory (little-endian): byte 0=B, byte 1=G, byte 2=R, byte 3=A
+			std::vector<uint32_t> pixels(width * height);
+			for (size_t i = 0; i < width * height; ++i) {
+				unsigned char r = image[i * 4 + 0];
+				unsigned char g = image[i * 4 + 1];
+				unsigned char b = image[i * 4 + 2];
+				unsigned char a = image[i * 4 + 3];
+				// Pack as BGRA: (A << 24) | (R << 16) | (G << 8) | B
+				pixels[i] = (a << 24) | (r << 16) | (g << 8) | b;
+			}
+
+			texture = new veekay::graphics::Texture(cmd, width, height,
+			                                        VK_FORMAT_B8G8R8A8_UNORM,
+			                                        pixels.data());
+
+			// Calculate number of mip levels (same logic as in Texture constructor)
+			uint32_t mips = 1;
+			if ((width & (width - 1)) == 0 && (height & (height - 1)) == 0) {
+				mips = uint32_t(std::floor(std::log2(std::max(width, height)))) + 1;
+			}
+
+			// Create sampler for loaded texture
+			VkSamplerCreateInfo info{
+				.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+				.magFilter = VK_FILTER_LINEAR,
+				.minFilter = VK_FILTER_LINEAR,
+				.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+				.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+				.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+				.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+				.mipLodBias = 0.0f,
+				.anisotropyEnable = VK_FALSE,
+				.maxAnisotropy = 1.0f,
+				.compareEnable = VK_FALSE,
+				.compareOp = VK_COMPARE_OP_ALWAYS,
+				.minLod = 0.0f,
+				.maxLod = static_cast<float>(mips - 1),
+				.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK,
+				.unnormalizedCoordinates = VK_FALSE,
+			};
+
+			if (vkCreateSampler(device, &info, nullptr, &texture_sampler) != VK_SUCCESS) {
+				std::cerr << "Failed to create Vulkan texture sampler\n";
+				veekay::app.running = false;
+				return;
+			}
+		}
+	}
+
 	{
 		VkDescriptorBufferInfo buffer_infos[] = {
 			{
@@ -484,6 +567,12 @@ void initialize(VkCommandBuffer cmd) {
 				.offset = 0,
 				.range = sizeof(ModelUniforms),
 			},
+		};
+
+		VkDescriptorImageInfo image_info{
+			.sampler = texture_sampler,
+			.imageView = texture->view,
+			.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 		};
 
 		VkWriteDescriptorSet write_infos[] = {
@@ -504,6 +593,15 @@ void initialize(VkCommandBuffer cmd) {
 				.descriptorCount = 1,
 				.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
 				.pBufferInfo = &buffer_infos[1],
+			},
+			{
+				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				.dstSet = descriptor_set,
+				.dstBinding = 2,
+				.dstArrayElement = 0,
+				.descriptorCount = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.pImageInfo = &image_info,
 			},
 		};
 
@@ -607,6 +705,11 @@ void initialize(VkCommandBuffer cmd) {
 // NOTE: Destroy resources here, do not cause leaks in your program!
 void shutdown() {
 	VkDevice& device = veekay::app.vk_device;
+
+	vkDestroySampler(device, texture_sampler, nullptr);
+	if (texture != missing_texture) {
+		delete texture;
+	}
 
 	vkDestroySampler(device, missing_texture_sampler, nullptr);
 	delete missing_texture;

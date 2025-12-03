@@ -53,6 +53,11 @@ struct Model {
 	veekay::vec3 albedo_color;
 };
 
+enum class ProjectionType {
+	Perspective,
+	Orthographic
+};
+
 struct Camera {
 	constexpr static float default_fov = 60.0f;
 	constexpr static float default_near_plane = 0.01f;
@@ -64,6 +69,8 @@ struct Camera {
 	float fov = default_fov;
 	float near_plane = default_near_plane;
 	float far_plane = default_far_plane;
+
+	ProjectionType projection_type = ProjectionType::Perspective;
 
 	// NOTE: View matrix of camera (inverse of a transform)
 	veekay::mat4 view() const;
@@ -127,8 +134,14 @@ veekay::mat4 Camera::view() const {
 }
 
 veekay::mat4 Camera::view_projection(float aspect_ratio) const {
-	auto projection = veekay::mat4::projection(fov, aspect_ratio, near_plane, far_plane);
-
+	veekay::mat4 projection;
+	if (projection_type == ProjectionType::Perspective) {
+		projection = veekay::mat4::projection(fov, aspect_ratio, near_plane, far_plane);
+	} else {
+		float ortho_height = 2.0f; // Можно сделать настраиваемым
+		float ortho_width = ortho_height * aspect_ratio;
+		projection = veekay::mat4::orthographic(-ortho_width, ortho_width, -ortho_height, ortho_height, near_plane, far_plane);
+	}
 	return view() * projection;
 }
 
@@ -617,8 +630,6 @@ void shutdown() {
 }
 
 void update(double time) {
-
-
 	static float rotation_speed = 45.0f; // градусов в секунду
 	static float cube_angle = 0.0f;
 	static double last_time = 0.0;
@@ -628,6 +639,8 @@ void update(double time) {
 
 	ImGui::Begin("Controls:");
 	ImGui::SliderFloat("Rotation speed (deg/s)", &rotation_speed, 0.0f, 180.0f, "%.1f");
+	ImGui::Text("Press 1: Perspective\nPress 2: Orthographic");
+	ImGui::Text("Current projection: %s", camera.projection_type == ProjectionType::Perspective ? "Perspective" : "Orthographic");
 	ImGui::End();
 
 	cube_angle += rotation_speed * delta_time * (M_PI / 180.0f); // переводим в радианы
@@ -635,11 +648,18 @@ void update(double time) {
 	if (!ImGui::IsWindowHovered()) {
 		using namespace veekay::input;
 
+		if (keyboard::isKeyPressed(keyboard::Key::d1)) {
+			camera.projection_type = ProjectionType::Perspective;
+		}
+		if (keyboard::isKeyPressed(keyboard::Key::d2)) {
+			camera.projection_type = ProjectionType::Orthographic;
+		}
+
 		if (mouse::isButtonDown(mouse::Button::left)) {
 			auto move_delta = mouse::cursorDelta();
 
 			// TODO: Use mouse_delta to update camera rotation
-			
+            
 			auto view = camera.view();
 
 			// TODO: Calculate right, up and front from view matrix
@@ -671,7 +691,6 @@ void update(double time) {
 	SceneUniforms scene_uniforms{
 		.view_projection = camera.view_projection(aspect_ratio),
 	};
-
 
 	std::vector<ModelUniforms> model_uniforms(models.size());
 	for (size_t i = 0, n = models.size(); i < n; ++i) {

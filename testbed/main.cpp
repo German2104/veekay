@@ -75,7 +75,7 @@ struct Camera {
 // NOTE: Scene objects
 inline namespace {
 	Camera camera{
-		.position = {0.0f, -0.5f, -3.0f}
+		.position = {0.0f, 0.5f, -3.0f} // камера чуть выше
 	};
 
 	std::vector<Model> models;
@@ -581,35 +581,13 @@ void initialize(VkCommandBuffer cmd) {
 		cube_mesh.indices = uint32_t(indices.size());
 	}
 
-	// NOTE: Add models to scene
-	models.emplace_back(Model{
-		.mesh = plane_mesh,
-		.transform = Transform{},
-		.albedo_color = veekay::vec3{1.0f, 1.0f, 1.0f}
-	});
-
+	// NOTE: Add only one cube model to scene
 	models.emplace_back(Model{
 		.mesh = cube_mesh,
 		.transform = Transform{
-			.position = {-2.0f, -0.5f, -1.5f},
+			.position = {0.0f, 0.0f, 0.0f},
 		},
-		.albedo_color = veekay::vec3{1.0f, 0.0f, 0.0f}
-	});
-
-	models.emplace_back(Model{
-		.mesh = cube_mesh,
-		.transform = Transform{
-			.position = {1.5f, -0.5f, -0.5f},
-		},
-		.albedo_color = veekay::vec3{0.0f, 1.0f, 0.0f}
-	});
-
-	models.emplace_back(Model{
-		.mesh = cube_mesh,
-		.transform = Transform{
-			.position = {0.0f, -0.5f, 1.0f},
-		},
-		.albedo_color = veekay::vec3{0.0f, 0.0f, 1.0f}
+		.albedo_color = veekay::vec3{0.0f, 0.5f, 1.0f} // фиксированный цвет
 	});
 }
 
@@ -639,8 +617,20 @@ void shutdown() {
 }
 
 void update(double time) {
+
+
+	static float rotation_speed = 45.0f; // градусов в секунду
+	static float cube_angle = 0.0f;
+	static double last_time = 0.0;
+
+	double delta_time = last_time > 0.0 ? time - last_time : 0.0;
+	last_time = time;
+
 	ImGui::Begin("Controls:");
+	ImGui::SliderFloat("Rotation speed (deg/s)", &rotation_speed, 0.0f, 180.0f, "%.1f");
 	ImGui::End();
+
+	cube_angle += rotation_speed * delta_time * (M_PI / 180.0f); // переводим в радианы
 
 	if (!ImGui::IsWindowHovered()) {
 		using namespace veekay::input;
@@ -682,12 +672,21 @@ void update(double time) {
 		.view_projection = camera.view_projection(aspect_ratio),
 	};
 
+
 	std::vector<ModelUniforms> model_uniforms(models.size());
 	for (size_t i = 0, n = models.size(); i < n; ++i) {
 		const Model& model = models[i];
 		ModelUniforms& uniforms = model_uniforms[i];
 
-		uniforms.model = model.transform.matrix();
+		// Для кубов применяем вращение вокруг Y
+		if (model.mesh.indices == 36) {
+			veekay::mat4 rotation = veekay::mat4::rotation({0.0f, 1.0f, 0.0f}, cube_angle);
+			veekay::mat4 translation = veekay::mat4::translation(model.transform.position);
+			veekay::mat4 scale = veekay::mat4::scaling(model.transform.scale);
+			uniforms.model = translation * rotation * scale;
+		} else {
+			uniforms.model = model.transform.matrix();
+		}
 		uniforms.albedo_color = model.albedo_color;
 	}
 
